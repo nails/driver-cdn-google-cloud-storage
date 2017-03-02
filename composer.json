@@ -1,0 +1,47 @@
+{
+    "name": "nailsapp/driver-cdn-google-cloud-storage",
+    "keywords": ["Nails", "Shed Collective", "CodeIgniter", "CDN Module", "Driver", "Google Cloud Storage"],
+    "homepage": "http://nailsapp.co.uk/modules/cdn/driver/google-cloud-storage",
+    "description": "This is the \"Google Cloud Storage\" driver for the Nails CDN module.",
+    "license": "MIT",
+    "authors":
+    [
+        {
+            "name": "Pablo de la Pena",
+            "email": "p@nailsapp.co.uk",
+            "homepage": "http://nailsapp.co.uk",
+            "role": "Developer"
+        }
+    ],
+    "support":
+    {
+        "email": "hello@nailsapp.co.uk"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require": {
+        "nailsapp/module-cdn": "dev-develop",
+        "google/cloud": "~0.21.1"
+    },
+    "require-dev":
+    {
+        "phpunit/phpunit": "4.*"
+    },
+    "autoload":
+    {
+        "psr-4": {"Nails\\Cdn\\Driver\\": "src/"}
+    },
+    "extra":
+    {
+        "nails" :
+        {
+            "name": "Google Cloud Storage",
+            "type": "driver",
+            "forModule": "nailsapp/module-cdn",
+            "data": {
+                "namespace": "Nails\\Cdn\\Driver\\",
+                "class": "GoogleCloudStorage"
+            }
+        }
+    }
+}
