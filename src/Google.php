@@ -2,9 +2,11 @@
 
 namespace Nails\Cdn\Driver;
 
+use Google\Cloud\Storage\StorageClient;
 use Nails\Cdn\Exception\DriverException;
 use Nails\Cdn\Interfaces\Driver;
 use Nails\Common\Traits\ErrorHandling;
+use Nails\Environment;
 
 class Google implements Driver
 {
@@ -12,33 +14,101 @@ class Google implements Driver
 
     // --------------------------------------------------------------------------
 
-    protected $sS3Bucket;
-    protected $oGoogle;
+    /**
+     * The Google Cloud SDK
+     * @var StorageClient
+     */
+    protected $oSdk;
+
+    /**
+     * The Google Storage bucket where items will be stored (not to be confused with internal buckets)
+     * @var string
+     */
+    protected $sBucket;
+
+    /**
+     * The endpoint for serving items from storage
+     * @var string
+     */
+    protected $sUriServe;
+
+    /**
+     * The endpoint for securely serving items from storage
+     * @var string
+     */
+    protected $sUriServeSecure;
+
+    /**
+     * The endpoint for serving items which are to be processed
+     * @var string
+     */
+    protected $sUriProcess;
+
+    /**
+     * The endpoint for securely serving items which are to be processed
+     * @var string
+     */
+    protected $sUriProcessSecure;
 
     // --------------------------------------------------------------------------
 
     /**
-     * Constructor
+     * Google constructor.
+     * @throws DriverException
      */
     public function __construct()
     {
-        /**
-         * Check all the constants are defined properly
-         * DEPLOY_CDN_DRIVER_GOOGLE_*
-         */
-
-        if (!defined('DEPLOY_CDN_DRIVER_GOOGLE_*')) {
-            throw new DriverException('Constant "DEPLOY_CDN_DRIVER_GOOGLE_*" is not defined', 1);
+        $aConstants = [
+            'APP_CDN_DRIVER_GOOGLE_KEY_FILE',
+            'APP_CDN_DRIVER_GOOGLE_BUCKET_' . Environment::get(),
+        ];
+        foreach ($aConstants as $sConstant) {
+            if (!defined($sConstant)) {
+                throw new DriverException(
+                    'Constant "' . $sConstant . '" is not defined'
+                );
+            }
         }
 
         // --------------------------------------------------------------------------
 
-        //  Instantiate the AWS PHP SDK
-        $this->oGoogle = null; //  @todo
+        if (is_file(APP_CDN_DRIVER_GOOGLE_KEY_FILE)) {
+            $sKey = file_get_contents(APP_CDN_DRIVER_GOOGLE_KEY_FILE);
+        } else {
+            $sKey = APP_CDN_DRIVER_GOOGLE_KEY_FILE;
+        }
+        $aKey = json_decode($sKey, true);
+
+        //  Instantiate the SDK
+        $this->oSdk = new StorageClient([
+            'keyFile' => $aKey,
+        ]);
 
         //  Set the bucket we're using
-        $this->sS3Bucket = DEPLOY_CDN_DRIVER_AWS_S3_BUCKET;
+        $this->sBucket = constant('APP_CDN_DRIVER_GOOGLE_BUCKET_' . Environment::get());
+
+        // --------------------------------------------------------------------------
+        
+        //  Set default values
+        $aProperties = [
+            ['sUriServe', 'APP_CDN_DRIVER_GOOGLE_URI_SERVE', 'http://{{bucket}}.storage.googleapis.com'],
+            ['sUriServeSecure', 'APP_CDN_DRIVER_GOOGLE_URI_SERVE_SECURE', 'https://{{bucket}}.storage.googleapis.com'],
+            ['sUriProcess', 'APP_CDN_DRIVER_GOOGLE_URI_PROCESS', site_url('cdn')],
+            ['sUriProcessSecure', 'APP_CDN_DRIVER_GOOGLE_URI_PROCESS_SECURE', site_url('cdn', true)],
+        ];
+        foreach ($aProperties as $aProperty) {
+            list($sProp, $sConst, $sDefault) = $aProperty;
+            if (is_null($this->{$sProp})) {
+                if (defined($sConst)) {
+                    $this->{$sProp} = str_replace('{{bucket}}', $this->sBucket, addTrailingSlash(constant($sConst)));
+                } else {
+                    $this->{$sProp} = str_replace('{{bucket}}', $this->sBucket, addTrailingSlash($sDefault));
+                }
+            }
+        }
     }
+
+    // --------------------------------------------------------------------------
 
     /**
      * OBJECT METHODS
@@ -53,54 +123,61 @@ class Google implements Driver
     {
         $sBucket       = !empty($oData->bucket->slug) ? $oData->bucket->slug : '';
         $sFilenameOrig = !empty($oData->filename) ? $oData->filename : '';
-
-        $sFilename  = strtolower(substr($sFilenameOrig, 0, strrpos($sFilenameOrig, '.')));
-        $sExtension = strtolower(substr($sFilenameOrig, strrpos($sFilenameOrig, '.')));
-
-        $sSource = !empty($oData->file) ? $oData->file : '';
-        $sMime   = !empty($oData->mime) ? $oData->mime : '';
-        $sName   = !empty($oData->name) ? $oData->name : 'file' . $sExtension;
+        $sFilename     = strtolower(substr($sFilenameOrig, 0, strrpos($sFilenameOrig, '.')));
+        $sExtension    = strtolower(substr($sFilenameOrig, strrpos($sFilenameOrig, '.')));
+        $sSource       = !empty($oData->file) ? $oData->file : '';
+        $sMime         = !empty($oData->mime) ? $oData->mime : '';
+        $sName         = !empty($oData->name) ? $oData->name : 'file' . $sExtension;
+        $sObject       = $sBucket . '/' . $sFilename . $sExtension;
+        $sObjectDl     = $sBucket . '/' . $sFilename . '-download' . $sExtension;
 
         // --------------------------------------------------------------------------
 
         try {
 
-            $this->oGoogle->putObject(array(
-                'Bucket'      => $this->sS3Bucket,
-                'Key'         => $sBucket . '/' . $sFilename . $sExtension,
-                'SourceFile'  => $sSource,
-                'ContentType' => $sMime,
-                'ACL'         => 'public-read'
-            ));
+            //  Create "normal" version
+            $this->oSdk
+                ->bucket($this->sBucket)
+                ->upload(
+                    fopen($sSource, 'r'),
+                    [
+                        'name'          => $sObject,
+                        'predefinedAcl' => 'publicRead',
+                        'metadata'      => [
+                            'contentType' => $sMime,
+                        ],
+                    ]
+                );
 
-            /**
-             * Now try to duplicate the file and set the appropriate meta tag so there's
-             * a downloadable version
-             */
+            //  Create "download" version
+            $this->oSdk
+                ->bucket($this->sBucket)
+                ->object($sObject)
+                ->copy(
+                    $this->sBucket,
+                    [
+                        'name'          => $sObjectDl,
+                        'predefinedAcl' => 'publicRead',
+                    ]
+                );
 
-            try {
+            //  Apply new meta data to download version
+            $this->oSdk
+                ->bucket($this->sBucket)
+                ->object($sObjectDl)
+                ->update(
+                    [
+                        'contentType'        => 'application/octet-stream',
+                        'contentDisposition' => 'attachment; filename="' . str_replace('"', '', $sName) . '" ',
+                    ]
+                );
 
-                $this->oGoogle->copyObject(array(
-                    'Bucket'             => $this->sS3Bucket,
-                    'CopySource'         => $this->sS3Bucket . '/' . $sBucket . '/' . $sFilename . $sExtension,
-                    'Key'                => $sBucket . '/' . $sFilename . '-download' . $sExtension,
-                    'ContentType'        => 'application/octet-stream',
-                    'ContentDisposition' => 'attachment; filename="' . str_replace('"', '', $sName) . '" ',
-                    'MetadataDirective'  => 'REPLACE',
-                    'ACL'                => 'public-read'
-                ));
+            return true;
 
-                return true;
+        } catch (\Exception $e) {
 
-            } catch (\Exception $oE) {
+            $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($e) . ': ' . $e->getMessage());
 
-                $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($oE) . ': ' . $oE->getMessage());
-                return false;
-            }
-
-        } catch (\Exception $oE) {
-
-            $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($oE) . ': ' . $oE->getMessage());
             return false;
         }
     }
@@ -110,12 +187,15 @@ class Google implements Driver
     /**
      * Determines whether an object exists or not
      * @param  string $sFilename The object's filename
-     * @param  string $sBucket   The bucket's slug
+     * @param  string $sBucket The bucket's slug
      * @return boolean
      */
     public function objectExists($sFilename, $sBucket)
     {
-        return $this->oGoogle->doesObjectExist($sBucket, $sFilename);
+        return $this->oSdk
+            ->bucket($this->sBucket)
+            ->object($sBucket . '/' . $sFilename)
+            ->exists();
     }
 
     // --------------------------------------------------------------------------
@@ -132,19 +212,27 @@ class Google implements Driver
 
             $sFilename  = strtolower(substr($sObject, 0, strrpos($sObject, '.')));
             $sExtension = strtolower(substr($sObject, strrpos($sObject, '.')));
+            $sObject    = $sBucket . '/' . $sFilename . $sExtension;
+            $sObjectDl  = $sBucket . '/' . $sFilename . '-download' . $sExtension;
 
-            $aOptions              = array();
-            $aOptions['Bucket']    = $this->sS3Bucket;
-            $aOptions['Objects']   = array();
-            $aOptions['Objects'][] = array('Key' => $sBucket . '/' . $sFilename . $sExtension);
-            $aOptions['Objects'][] = array('Key' => $sBucket . '/' . $sFilename . '-download' . $sExtension);
+            //  Delete "normal" version
+            $this->oSdk
+                ->bucket($this->sBucket)
+                ->object($sObject)
+                ->delete();
 
-            $this->oGoogle->deleteObjects($aOptions);
+            //  Delete "download" version
+            $this->oSdk
+                ->bucket($this->sBucket)
+                ->object($sObjectDl)
+                ->delete();
+
             return true;
 
-        } catch (\Exception $oE) {
+        } catch (\Exception $e) {
 
-            $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($oE) . ': ' . $oE->getMessage());
+            $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($e) . ': ' . $e->getMessage());
+
             return false;
         }
     }
@@ -153,7 +241,7 @@ class Google implements Driver
 
     /**
      * Returns a local path for an object
-     * @param  string $sBucket   The bucket's slug
+     * @param  string $sBucket The bucket's slug
      * @param  string $sFilename The filename
      * @return mixed             String on success, false on failure
      */
@@ -172,32 +260,33 @@ class Google implements Driver
 
         } else {
 
-            //  Doesn't exist, attempt to fetch from S3
+            //  Doesn't exist, attempt to fetch from Google Cloud Storage
             try {
 
-                $this->oGoogle->getObject(array(
-                    'Bucket' => $this->sS3Bucket,
-                    'Key'    => $sBucket . '/' . $sFilename . $sExtension,
-                    'SaveAs' => $sSrcFile
-                ));
+
+                $this->oSdk
+                    ->bucket($this->sBucket)
+                    ->object($sBucket . '/' . $sFilename . $sExtension)
+                    ->downloadToFile($sSrcFile);
 
                 return $sSrcFile;
 
-            } catch (S3Exception $oE) {
+            } catch (\Exception $e) {
 
                 //  Clean up
                 if (file_exists($sSrcFile)) {
-
                     unlink($sSrcFile);
                 }
 
                 //  Note the error
-                $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($oE) . ': ' . $oE->getMessage());
+                $this->setError('GOOGLE-SDK EXCEPTION: ' . get_class($e) . ': ' . $e->getMessage());
 
                 return false;
             }
         }
     }
+
+    // --------------------------------------------------------------------------
 
     /**
      * BUCKET METHODS
@@ -205,34 +294,33 @@ class Google implements Driver
 
     /**
      * Creates a new bucket
-     * @param  string  $sBucket The bucket's slug
+     * @param  string $sBucket The bucket's slug
      * @return boolean
      */
     public function bucketCreate($sBucket)
     {
-        //  Attempt to create a 'folder' object on S3
-        if (!$this->oGoogle->doesObjectExist($this->sS3Bucket, $sBucket . '/')) {
+        try {
 
-            try {
-
-                $this->oGoogle->putObject(array(
-                    'Bucket' => $this->sS3Bucket,
-                    'Key'    => $sBucket . '/',
-                    'Body'   => ''
-                ));
-
-                return true;
-
-            } catch (\Exception $oE) {
-
-                $this->setError('GOOGLE-SDK ERROR: ' . $oE->getMessage());
-                return false;
+            if (!$this->objectExists($sBucket, '')) {
+                $this->oSdk
+                    ->bucket($this->sBucket)
+                    ->upload(
+                        '',
+                        [
+                            'name'          => $sBucket,
+                            'predefinedAcl' => 'publicRead',
+                        ]
+                    );
             }
 
-        } else {
-
-            //  Bucket already exists.
             return true;
+
+        } catch (\Exception $e) {
+
+            $this->setError('GOOGLE-SDK ERROR: ' . $e->getMessage());
+
+            return false;
+
         }
     }
 
@@ -240,22 +328,31 @@ class Google implements Driver
 
     /**
      * Deletes an existing bucket
-     * @param  string  $sBucket The bucket's slug
+     * @param  string $sBucket The bucket's slug
      * @return boolean
      */
     public function bucketDestroy($sBucket)
     {
+        //  @todo - consider the implications of bucket deletion; maybe prevent deletion of non-empty buckets
+        dumpanddie('@todo');
         try {
 
-            $this->oGoogle->deleteMatchingObjects($this->sS3Bucket, $sBucket . '/');
+            $this->oSdk
+                ->bucket($this->sBucket)
+                ->object($sBucket)
+                ->delete();
+
             return true;
 
-        } catch (\Exception $oE) {
+        } catch (\Exception $e) {
 
-            $this->setError('GOOGLE-SDK ERROR: ' . $oE->getMessage());
+            $this->setError('GOOGLE-SDK ERROR: ' . $e->getMessage());
+
             return false;
         }
     }
+
+    // --------------------------------------------------------------------------
 
     /**
      * URL GENERATOR METHODS
@@ -263,47 +360,31 @@ class Google implements Driver
 
     /**
      * Generates the correct URL for serving a file
-     * @param  string  $sObject        The object to serve
-     * @param  string  $sBucket        The bucket to serve from
+     * @param  string $sObject The object to serve
+     * @param  string $sBucket The bucket to serve from
      * @param  boolean $bForceDownload Whether to force a download
      * @return string
      */
     public function urlServe($sObject, $sBucket, $bForceDownload = false)
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_SERVING;
-        $sUrl .= $sBucket . '/';
+        $sUrl       = $this->urlServeScheme($bForceDownload);
+        $sFilename  = strtolower(substr($sObject, 0, strrpos($sObject, '.')));
+        $sExtension = strtolower(substr($sObject, strrpos($sObject, '.')));
 
-        if ($bForceDownload) {
+        //  Sub in the values
+        $sUrl = str_replace('{{bucket}}', $sBucket, $sUrl);
+        $sUrl = str_replace('{{filename}}', $sFilename, $sUrl);
+        $sUrl = str_replace('{{extension}}', $sExtension, $sUrl);
 
-            /**
-             * If we're forcing the download we need to reference a slightly different file.
-             * On upload two instances were created, the "normal" streaming type one and
-             * another with the appropriate content-types set so that the browser downloads
-             * as opposed to renders it
-             */
-
-            $sFilename  = strtolower(substr($sObject, 0, strrpos($sObject, '.')));
-            $sExtension = strtolower(substr($sObject, strrpos($sObject, '.')));
-
-            $sUrl .= $sFilename;
-            $sUrl .= '-download';
-            $sUrl .= $sExtension;
-
-        } else {
-
-            //  If we're not forcing the download we can serve straight out of S3
-            $sUrl .= $sObject;
-        }
-
-        return $this->urlMakeSecure($sUrl, false);
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Generate the correct URL for serving a file direct from the file system
-     * @param  string  $sObject        The object to serve
-     * @param  string  $sBucket        The bucket to serve from
+     * @param  string $sObject The object to serve
+     * @param  string $sBucket The bucket to serve from
      * @return string
      */
     public function urlServeRaw($sObject, $sBucket)
@@ -315,28 +396,22 @@ class Google implements Driver
 
     /**
      * Returns the scheme of 'serve' URLs
-     * @param  boolean $bForceDownload Whetehr or not to force download
+     * @param  boolean $bForceDownload Whether or not to force download
      * @return string
      */
     public function urlServeScheme($bForceDownload = false)
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_SERVING;
-        $sUrl .= '{{bucket}}/';
+        $sUrl = addTrailingSlash($this->sUriServe . '{{bucket}}');
 
+        /**
+         * If we're forcing the download we need to reference a slightly different file.
+         * On upload two instances were created, the "normal" streaming type one and
+         * another with the appropriate content-types set so that the browser downloads
+         * as opposed to renders it
+         */
         if ($bForceDownload) {
-
-            /**
-             * If we're forcing the download we need to reference a slightly different file.
-             * On upload two instances were created, the "normal" streaming type one and
-             * another with the appropriate content-types set so that the browser downloads
-             * as oppossed to renders it
-             */
-
             $sUrl .= '{{filename}}-download{{extension}}';
-
         } else {
-
-            //  If we're not forcing the download we can serve straight out of S3
             $sUrl .= '{{filename}}{{extension}}';
         }
 
@@ -347,18 +422,21 @@ class Google implements Driver
 
     /**
      * Generates a URL for serving zipped objects
-     * @param  string $sObjectIds A comma seperated list of object IDs
-     * @param  string $sHash      The security hash
-     * @param  string $sFilename  The filename to give the zip file
+     * @param  string $sObjectIds A comma separated list of object IDs
+     * @param  string $sHash The security hash
+     * @param  string $sFilename The filename to give the zip file
      * @return string
      */
     public function urlServeZipped($sObjectIds, $sHash, $sFilename)
     {
-        $sFilename = $sFilename ? '/' . urlencode($sFilename) : '';
+        $sUrl = $this->urlServeZippedScheme();
 
-        $sUrl = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING . 'zip/' . $sObjectIds . '/' . $sHash . $sFilename;
+        //  Sub in the values
+        $sUrl = str_replace('{{ids}}', $sObjectIds, $sUrl);
+        $sUrl = str_replace('{{hash}}', $sHash, $sUrl);
+        $sUrl = str_replace('{{filename}}', urlencode($sFilename), $sUrl);
 
-        return $this->urlMakeSecure($sUrl);
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
@@ -369,28 +447,37 @@ class Google implements Driver
      */
     public function urlServeZippedScheme()
     {
-        $sUrl = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING . 'zip/{{ids}}/{{hash}}/{{filename}}';
-        return $this->urlMakeSecure($sUrl);
+        return $this->urlMakeSecure(
+            addTrailingSlash(
+                $this->sUriProcess . 'zip/{{ids}}/{{hash}}/{{filename}}'
+            )
+        );
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Generates the correct URL for using the crop utility
-     * @param   string  $sBucket The bucket which the image resides in
-     * @param   string  $sObject The filename of the image we're cropping
-     * @param   integer $iWidth  The width of the cropped image
+     * @param   string $sBucket The bucket which the image resides in
+     * @param   string $sObject The filename of the image we're cropping
+     * @param   integer $iWidth The width of the cropped image
      * @param   integer $iHeight The height of the cropped image
      * @return  string
      */
     public function urlCrop($sObject, $sBucket, $iWidth, $iHeight)
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING . 'crop/';
-        $sUrl .= $iWidth . '/' . $iHeight . '/';
-        $sUrl .= $sBucket . '/';
-        $sUrl .= $sObject;
+        $sUrl       = $this->urlCropScheme();
+        $sFilename  = strtolower(substr($sObject, 0, strrpos($sObject, '.')));
+        $sExtension = strtolower(substr($sObject, strrpos($sObject, '.')));
 
-        return $this->urlMakeSecure($sUrl);
+        //  Sub in the values
+        $sUrl = str_replace('{{width}}', $iWidth, $sUrl);
+        $sUrl = str_replace('{{height}}', $iHeight, $sUrl);
+        $sUrl = str_replace('{{bucket}}', $sBucket, $sUrl);
+        $sUrl = str_replace('{{filename}}', $sFilename, $sUrl);
+        $sUrl = str_replace('{{extension}}', $sExtension, $sUrl);
+
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
@@ -401,30 +488,37 @@ class Google implements Driver
      */
     public function urlCropScheme()
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING;
-        $sUrl .= 'crop/{{width}}/{{height}}/{{bucket}}/{{filename}}{{extension}}';
-
-        return $this->urlMakeSecure($sUrl);
+        return $this->urlMakeSecure(
+            addTrailingSlash(
+                $this->sUriProcess . 'crop/{{width}}/{{height}}/{{bucket}}/{{filename}}{{extension}}'
+            )
+        );
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Generates the correct URL for using the scale utility
-     * @param   string  $sBucket The bucket which the image resides in
-     * @param   string  $sObject The filename of the image we're 'scaling'
-     * @param   integer $iWidth  The width of the scaled image
+     * @param   string $sBucket The bucket which the image resides in
+     * @param   string $sObject The filename of the image we're 'scaling'
+     * @param   integer $iWidth The width of the scaled image
      * @param   integer $iHeight The height of the scaled image
      * @return  string
      */
     public function urlScale($sObject, $sBucket, $iWidth, $iHeight)
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING . 'scale/';
-        $sUrl .= $iWidth . '/' . $iHeight . '/';
-        $sUrl .= $sBucket . '/';
-        $sUrl .= $sObject;
+        $sUrl       = $this->urlScaleScheme();
+        $sFilename  = strtolower(substr($sObject, 0, strrpos($sObject, '.')));
+        $sExtension = strtolower(substr($sObject, strrpos($sObject, '.')));
 
-        return $this->urlMakeSecure($sUrl);
+        //  Sub in the values
+        $sUrl = str_replace('{{width}}', $iWidth, $sUrl);
+        $sUrl = str_replace('{{height}}', $iHeight, $sUrl);
+        $sUrl = str_replace('{{bucket}}', $sBucket, $sUrl);
+        $sUrl = str_replace('{{filename}}', $sFilename, $sUrl);
+        $sUrl = str_replace('{{extension}}', $sExtension, $sUrl);
+
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
@@ -435,27 +529,32 @@ class Google implements Driver
      */
     public function urlScaleScheme()
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING;
-        $sUrl .= 'scale/{{width}}/{{height}}/{{bucket}}/{{filename}}{{extension}}';
-
-        return $this->urlMakeSecure($sUrl);
+        return $this->urlMakeSecure(
+            addTrailingSlash(
+                $this->sUriProcess . 'scale/{{width}}/{{height}}/{{bucket}}/{{filename}}{{extension}}'
+            )
+        );
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Generates the correct URL for using the placeholder utility
-     * @param   integer $iWidth  The width of the placeholder
+     * @param   integer $iWidth The width of the placeholder
      * @param   integer $iHeight The height of the placeholder
      * @param   integer $iBorder The width of the border round the placeholder
      * @return  string
      */
     public function urlPlaceholder($iWidth, $iHeight, $iBorder = 0)
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING . 'placeholder/';
-        $sUrl .= $iWidth . '/' . $iHeight . '/' . $iBorder;
+        $sUrl = $this->urlPlaceholderScheme();
 
-        return $this->urlMakeSecure($sUrl);
+        //  Sub in the values
+        $sUrl = str_replace('{{width}}', $iWidth, $sUrl);
+        $sUrl = str_replace('{{height}}', $iHeight, $sUrl);
+        $sUrl = str_replace('{{border}}', $iBorder, $sUrl);
+
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
@@ -466,27 +565,32 @@ class Google implements Driver
      */
     public function urlPlaceholderScheme()
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING;
-        $sUrl .= 'placeholder/{{width}}/{{height}}/{{border}}';
-
-        return $this->urlMakeSecure($sUrl);
+        return $this->urlMakeSecure(
+            addTrailingSlash(
+                $this->sUriProcess . 'placeholder/{{width}}/{{height}}/{{border}}'
+            )
+        );
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Generates the correct URL for a blank avatar
-     * @param  integer        $iWidth  The width fo the avatar
-     * @param  integer        $iHeight The height of the avatar§
-     * @param  string|integer $mSex    What gender the avatar should represent
+     * @param  integer $iWidth The width fo the avatar
+     * @param  integer $iHeight The height of the avatar§
+     * @param  string|integer $mSex What gender the avatar should represent
      * @return string
      */
     public function urlBlankAvatar($iWidth, $iHeight, $mSex = '')
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING . 'blank_avatar/';
-        $sUrl .= $iWidth . '/' . $iHeight . '/' . $mSex;
+        $sUrl = $this->urlBlankAvatarScheme();
 
-        return $this->urlMakeSecure($sUrl);
+        //  Sub in the values
+        $sUrl = str_replace('{{width}}', $iWidth, $sUrl);
+        $sUrl = str_replace('{{height}}', $iHeight, $sUrl);
+        $sUrl = str_replace('{{sex}}', $mSex, $sUrl);
+
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
@@ -497,45 +601,38 @@ class Google implements Driver
      */
     public function urlBlankAvatarScheme()
     {
-        $sUrl  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING;
-        $sUrl .= 'blank_avatar/{{width}}/{{height}}/{{sex}}';
-
-        return $this->urlMakeSecure($sUrl);
+        return $this->urlMakeSecure(
+            addTrailingSlash(
+                $this->sUriProcess . 'blank_avatar/{{width}}/{{height}}/{{sex}}'
+            )
+        );
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Generates a properly hashed expiring url
-     * @param  string  $sBucket        The bucket which the image resides in
-     * @param  string  $sObject        The object to be served
-     * @param  integer $iExpires       The length of time the URL should be valid for, in seconds
+     * @param  string $sBucket The bucket which the image resides in
+     * @param  string $sObject The object to be served
+     * @param  integer $iExpires The length of time the URL should be valid for, in seconds
      * @param  boolean $bForceDownload Whether to force a download
      * @return string
      */
     public function urlExpiring($sObject, $sBucket, $iExpires, $bForceDownload = false)
     {
-        /**
-         * @todo: If CloudFront is configured, then generate a secure url and pass
-         * back, if not serve through the processing mechanism. Maybe.
-         */
+        $sUrl = $this->urlExpiringScheme();
 
         //  Hash the expiry time
-        $sHash  = $sBucket . '|' . $sObject . '|' . $iExpires . '|' . time() . '|';
-        $sHash .= md5(time() . $sBucket . $sObject . $iExpires . APP_PRIVATE_KEY);
-        $sHash  = get_instance()->encrypt->encode($sHash, APP_PRIVATE_KEY);
-        $sHash  = urlencode($sHash);
+        $sToken = $sBucket . '|' . $sObject . '|' . $iExpires . '|' . time() . '|';
+        $sToken .= md5(time() . $sBucket . $sObject . $iExpires . APP_PRIVATE_KEY);
+        $sToken = get_instance()->encrypt->encode($sToken, APP_PRIVATE_KEY);
+        $sToken = urlencode($sToken);
 
-        $sUrl = 'serve?token=' . $sHash;
+        //  Sub in the values
+        $sUrl = str_replace('{{token}}', $sToken, $sUrl);
+        $sUrl = str_replace('{{download}}', $bForceDownload ? 1 : 0, $sUrl);
 
-        if ($bForceDownload) {
-
-            $sUrl .= '&dl=1';
-        }
-
-        $sUrl = site_url($sUrl);
-
-        return $this->urlMakeSecure($sUrl);
+        return $sUrl;
     }
 
     // --------------------------------------------------------------------------
@@ -546,34 +643,29 @@ class Google implements Driver
      */
     public function urlExpiringScheme()
     {
-        $sUrl = site_url('serve?token={{token}}');
-        return $this->urlMakeSecure($sUrl);
+        return $this->urlMakeSecure(
+            site_url('serve?token={{token}}&dl={{download}}')
+        );
     }
 
     // --------------------------------------------------------------------------
 
     /**
      * Formats a URL and makes it secure if needed
-     * @param  string  $sUrl          The URL to secure
+     * @param  string $sUrl The URL to secure
      * @param  boolean $bIsProcessing Whether it's a processing type URL
      * @return string
      */
     protected function urlMakeSecure($sUrl, $bIsProcessing = true)
     {
         if (isPageSecure()) {
-
-            //  Make the URL secure
             if ($bIsProcessing) {
-
-                $sSearch  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING;
-                $sReplace = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_PROCESSING_SECURE;
-
+                $sSearch  = $this->sUriProcess;
+                $sReplace = $this->sUriProcessSecure;
             } else {
-
-                $sSearch  = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_SERVING;
-                $sReplace = DEPLOY_CDN_DRIVER_AWS_CLOUDFRONT_URL_SERVING_SECURE;
+                $sSearch  = $this->sUriServe;
+                $sReplace = $this->sUriServeSecure;
             }
-
             $sUrl = str_replace($sSearch, $sReplace, $sUrl);
         }
 

@@ -40,7 +40,7 @@
             "forModule": "nailsapp/module-cdn",
             "data": {
                 "namespace": "Nails\\Cdn\\Driver\\",
-                "class": "GoogleCloudStorage"
+                "class": "Google"
             }
         }
     }
