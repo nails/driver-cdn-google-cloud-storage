@@ -20,87 +20,70 @@ class Google extends Local
      */
     protected $sGSBucket;
 
-    /**
-     * The endpoint for serving items from storage
-     * @var string
-     */
-    protected $sUriServe;
+    // --------------------------------------------------------------------------
 
     /**
-     * The endpoint for securely serving items from storage
-     * @var string
+     * Returns an instance of the Google Cloud SDK
+     * @return StorageClient
+     * @throws DriverException
      */
-    protected $sUriServeSecure;
+    protected function sdk()
+    {
+        if (empty($this->oSdk)) {
 
-    /**
-     * The endpoint for serving items which are to be processed
-     * @var string
-     */
-    protected $sUriProcess;
+            $sKeyFile = $this->getSetting('key_file');
+            if (is_file($sKeyFile)) {
+                $sKey = file_get_contents($sKeyFile);
+            } else {
+                $sKey = $sKeyFile;
+            }
+            $aKey = json_decode($sKey, true);
 
-    /**
-     * The endpoint for securely serving items which are to be processed
-     * @var string
-     */
-    protected $sUriProcessSecure;
+            $this->oSdk = new StorageClient([
+                'keyFile' => $aKey,
+            ]);
+
+            $this->sGSBucket = $this->getBucket();
+        }
+
+        return $this->oSdk;
+    }
 
     // --------------------------------------------------------------------------
 
     /**
-     * Google constructor.
+     * Returns the Google Storage bucket for this environment
+     * @return string
      * @throws DriverException
      */
-    public function __construct()
+    protected function getBucket()
     {
-        $aConstants = [
-            'APP_CDN_DRIVER_GOOGLE_KEY_FILE',
-            'APP_CDN_DRIVER_GOOGLE_BUCKET_' . Environment::get(),
-        ];
-        foreach ($aConstants as $sConstant) {
-            if (!defined($sConstant)) {
-                throw new DriverException(
-                    'Constant "' . $sConstant . '" is not defined'
-                );
+        if (empty($this->sGSBucket)) {
+            $aBuckets = json_decode($this->getSetting('buckets'), true);
+            if (empty($aBuckets)) {
+                throw new DriverException('Google Storage Buckets have not been defined.');
+            } elseif (empty($aBuckets[Environment::get()])) {
+                throw new DriverException('No bucket defined for the ' . Environment::get() . ' environment.');
+            } else {
+                $this->sGSBucket = $aBuckets[Environment::get()];
             }
         }
 
-        // --------------------------------------------------------------------------
+        return $this->sGSBucket;
+    }
 
-        //  Instantiate the SDK
-        $sKeyFile = constant('APP_CDN_DRIVER_GOOGLE_KEY_FILE');
-        if (is_file($sKeyFile)) {
-            $sKey = file_get_contents($sKeyFile);
-        } else {
-            $sKey = $sKeyFile;
-        }
-        $aKey = json_decode($sKey, true);
+    // --------------------------------------------------------------------------
 
-        $this->oSdk = new StorageClient([
-            'keyFile' => $aKey,
-        ]);
-
-        //  Set the bucket we're using
-        $this->sGSBucket = constant('APP_CDN_DRIVER_GOOGLE_BUCKET_' . Environment::get());
-
-        // --------------------------------------------------------------------------
-
-        //  Set default values
-        $aProperties = [
-            ['sUriServe', 'APP_CDN_DRIVER_GOOGLE_URI_SERVE', 'http://{{bucket}}.storage.googleapis.com'],
-            ['sUriServeSecure', 'APP_CDN_DRIVER_GOOGLE_URI_SERVE_SECURE', 'https://{{bucket}}.storage.googleapis.com'],
-            ['sUriProcess', 'APP_CDN_DRIVER_GOOGLE_URI_PROCESS', site_url('cdn')],
-            ['sUriProcessSecure', 'APP_CDN_DRIVER_GOOGLE_URI_PROCESS_SECURE', site_url('cdn', true)],
-        ];
-        foreach ($aProperties as $aProperty) {
-            list($sProp, $sConst, $sDefault) = $aProperty;
-            if (is_null($this->{$sProp})) {
-                if (defined($sConst)) {
-                    $this->{$sProp} = str_replace('{{bucket}}', $this->sGSBucket, addTrailingSlash(constant($sConst)));
-                } else {
-                    $this->{$sProp} = str_replace('{{bucket}}', $this->sGSBucket, addTrailingSlash($sDefault));
-                }
-            }
-        }
+    /**
+     * Returns the requested URI and replaces {{bucket}} with the Google Storage bucket being used
+     *
+     * @param $sUriType
+     *
+     * @return string
+     */
+    protected function getUri($sUriType)
+    {
+        return str_replace('{{bucket}}', $this->getBucket(), $this->getSetting('uri_' . $sUriType));
     }
 
     // --------------------------------------------------------------------------
@@ -133,7 +116,7 @@ class Google extends Local
         try {
 
             //  Create "normal" version
-            $this->oSdk
+            $this->sdk()
                 ->bucket($this->sGSBucket)
                 ->upload(
                     fopen($sSource, 'r'),
@@ -147,7 +130,7 @@ class Google extends Local
                 );
 
             //  Create "download" version
-            $this->oSdk
+            $this->sdk()
                 ->bucket($this->sGSBucket)
                 ->object($sObject)
                 ->copy(
@@ -159,7 +142,7 @@ class Google extends Local
                 );
 
             //  Apply new meta data to download version
-            $this->oSdk
+            $this->sdk()
                 ->bucket($this->sGSBucket)
                 ->object($sObjectDl)
                 ->update(
@@ -189,7 +172,7 @@ class Google extends Local
      */
     public function objectExists($sFilename, $sBucket)
     {
-        return $this->oSdk
+        return $this->sdk()
             ->bucket($this->sGSBucket)
             ->object($sBucket . '/' . $sFilename)
             ->exists();
@@ -215,13 +198,13 @@ class Google extends Local
             $sObjectDl  = $sBucket . '/' . $sFilename . '-download' . $sExtension;
 
             //  Delete "normal" version
-            $this->oSdk
+            $this->sdk()
                 ->bucket($this->sGSBucket)
                 ->object($sObject)
                 ->delete();
 
             //  Delete "download" version
-            $this->oSdk
+            $this->sdk()
                 ->bucket($this->sGSBucket)
                 ->object($sObjectDl)
                 ->delete();
@@ -263,7 +246,7 @@ class Google extends Local
             try {
 
 
-                $this->oSdk
+                $this->sdk()
                     ->bucket($this->sGSBucket)
                     ->object($sBucket . '/' . $sFilename . $sExtension)
                     ->downloadToFile($sSrcFile);
@@ -302,7 +285,7 @@ class Google extends Local
         try {
 
             if (!$this->objectExists($sBucket, '')) {
-                $this->oSdk
+                $this->sdk()
                     ->bucket($this->sGSBucket)
                     ->upload(
                         '',
@@ -336,7 +319,7 @@ class Google extends Local
         dumpanddie('@todo');
         try {
 
-            $this->oSdk
+            $this->sdk()
                 ->bucket($this->sGSBucket)
                 ->object($sBucket)
                 ->delete();
@@ -379,7 +362,7 @@ class Google extends Local
      */
     public function urlServeScheme($bForceDownload = false)
     {
-        $sUrl = addTrailingSlash($this->sUriServe . '{{bucket}}');
+        $sUrl = addTrailingSlash($this->getUri('serve') . '/{{bucket}}');
 
         /**
          * If we're forcing the download we need to reference a slightly different file.
