@@ -367,7 +367,7 @@ class Google extends Local
         /**
          * If we're forcing the download we need to reference a slightly different file.
          * On upload two instances were created, the "normal" streaming type one and
-         * another with the appropriate content-types set so that the browser downloads
+         * another with the appropriate Content-Types set so that the browser downloads
          * as opposed to renders it
          */
         if ($bForceDownload) {
