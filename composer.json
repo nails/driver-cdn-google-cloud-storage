@@ -1,5 +1,5 @@
 {
-    "name": "nailsapp/driver-cdn-google-cloud-storage",
+    "name": "nails/driver-cdn-google-cloud-storage",
     "keywords": ["Nails", "Shed Collective", "CodeIgniter", "CDN Module", "Driver", "Google Cloud Storage"],
     "homepage": "http://nailsapp.co.uk/modules/cdn/driver/google-cloud-storage",
     "description": "This is the \"Google Cloud Storage\" driver for the Nails CDN module.",
@@ -20,7 +20,7 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "nailsapp/module-cdn": "dev-develop",
+        "nails/module-cdn": "dev-develop",
         "google/cloud": "~0.21.1"
     },
     "require-dev":
@@ -38,7 +38,7 @@
             "name": "Google Cloud Storage",
             "type": "driver",
             "subType": "storage",
-            "forModule": "nailsapp/module-cdn",
+            "forModule": "nails/module-cdn",
             "data": {
                 "namespace": "Nails\\Cdn\\Driver\\",
                 "class": "Google",

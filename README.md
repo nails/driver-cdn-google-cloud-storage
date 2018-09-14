@@ -7,7 +7,7 @@ http://nailsapp.co.uk/modules/cdn/driver/google-cloud-storage
 
 ## Installing
 
-    composer require nailsapp/driver-cdn-google
+    composer require nails/driver-cdn-google
     
     
 ## Configure
