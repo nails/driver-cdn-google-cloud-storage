@@ -21,7 +21,7 @@
     "prefer-stable": true,
     "require": {
         "nails/module-cdn": "dev-develop",
-        "google/cloud": "~0.91.0"
+        "google/cloud": "0.*"
     },
     "require-dev":
     {
