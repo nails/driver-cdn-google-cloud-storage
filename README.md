@@ -7,8 +7,6 @@
 
 This is the Google Cloud Storage driver for the Nails CDN module, it allows the CDN to use Google Storage buckets as a storage mechanism.
 
-http://nailsapp.co.uk/modules/cdn/driver/google-cloud-storage
-
 
 ## Installing
 
