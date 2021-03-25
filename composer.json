@@ -33,7 +33,7 @@
     },
     "autoload": {
         "psr-4": {
-            "Nails\\Cdn\\Driver\\": "src"/,
+            "Nails\\Cdn\\Driver\\": "src/",
             "Nails\\Cdn\\Driver\\Google\\": "src/Google/"
         }
     },
