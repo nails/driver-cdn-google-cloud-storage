@@ -1,7 +1,7 @@
 # Google Cloud Storage Driver for Nails CDN Module
 
 ![license](https://img.shields.io/badge/license-MIT-green.svg)
-[![CircleCI branch](https://img.shields.io/circleci/project/github/nails/driver-cdn-google-cloud-storage.svg)](https://circleci.com/gh/nails/driver-cdn-google-cloud-storage)
+[![tests](https://github.com/nails/driver-cdn-google-cloud-storage/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/nails/driver-cdn-google-cloud-storage/actions)
 [![Scrutinizer Code Quality](https://scrutinizer-ci.com/g/nails/driver-cdn-google-cloud-storage/badges/quality-score.png)](https://scrutinizer-ci.com/g/nails/driver-cdn-google-cloud-storage)
 
 This is the Google Cloud Storage driver for the Nails CDN module, it allows the CDN to use Google Storage buckets as a storage mechanism.
