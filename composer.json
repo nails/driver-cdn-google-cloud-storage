@@ -26,6 +26,7 @@
     "prefer-stable": true,
     "require": {
         "nails/module-cdn": "dev-develop",
+        "nails/driver-cdn-local": "dev-develop",
         "google/cloud": "0.*"
     },
     "require-dev": {

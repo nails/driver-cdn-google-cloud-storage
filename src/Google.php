@@ -5,6 +5,7 @@ namespace Nails\Cdn\Driver;
 use Google\Cloud\Storage\StorageClient;
 use Nails\Cdn\Exception\DriverException;
 use Nails\Common\Service\FileCache;
+use Nails\Common\Helper\Strings;
 use Nails\Environment;
 use Nails\Factory;
 
@@ -79,11 +80,11 @@ class Google extends Local
     /**
      * Returns the requested URI and replaces {{bucket}} with the Google Storage bucket being used
      *
-     * @param $sUriType
+     * @param string $sUriType
      *
      * @return string
      */
-    protected function getUri($sUriType)
+    protected function getUri(string $sUriType): string
     {
         return str_replace('{{bucket}}', $this->getBucket(), $this->getSetting('uri_' . $sUriType));
     }
@@ -320,8 +321,6 @@ class Google extends Local
      */
     public function bucketDestroy($sBucket)
     {
-        //  @todo - consider the implications of bucket deletion; maybe prevent deletion of non-empty buckets
-        dumpanddie('@todo');
         try {
 
             $this->sdk()
@@ -367,7 +366,7 @@ class Google extends Local
      */
     public function urlServeScheme($bForceDownload = false)
     {
-        $sUrl = addTrailingSlash($this->getUri('serve') . '/{{bucket}}');
+        $sUrl = Strings::addTrailingSlash($this->getUri('serve') . '/{{bucket}}');
 
         /**
          * If we're forcing the download we need to reference a slightly different file.
