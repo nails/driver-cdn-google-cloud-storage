@@ -1,6 +1,6 @@
 <?php
 
-namespace Nails\Cdn\Driver\Goolge\Settings;
+namespace Nails\Cdn\Driver\Google\Settings;
 
 use Nails\Common\Helper\Form;
 use Nails\Common\Interfaces;
