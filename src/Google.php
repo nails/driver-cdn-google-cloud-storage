@@ -13,13 +13,13 @@ class Google extends Local
 {
     /**
      * The Google Cloud SDK
-     * @var StorageClient
+     * @var StorageClient|null
      */
     protected $oSdk;
 
     /**
      * The Google Storage bucket where items will be stored (not to be confused with internal buckets)
-     * @var string
+     * @var string|null
      */
     protected $sGSBucket;
 
