@@ -25,8 +25,8 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "nails/module-cdn": "dev-develop",
-        "nails/driver-cdn-local": "dev-develop",
+        "nails/module-cdn": "dev-feature/pre-new-admin",
+        "nails/driver-cdn-local": "dev-feature/pre-new-admin",
         "google/cloud": "0.*"
     },
     "require-dev": {
