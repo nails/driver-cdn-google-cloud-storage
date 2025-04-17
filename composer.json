@@ -25,8 +25,8 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "nails/module-cdn": "dev-feature/pre-new-admin",
-        "nails/driver-cdn-local": "dev-feature/pre-new-admin",
+        "nails/module-cdn": "dev-feature/pre-new-admin-ci-php8",
+        "nails/driver-cdn-local": "dev-feature/pre-new-admin-ci-php8",
         "google/cloud": "0.*"
     },
     "require-dev": {
