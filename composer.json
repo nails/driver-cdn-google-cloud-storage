@@ -29,9 +29,11 @@
     "prefer-stable": true,
     "require":
     {
+        "php": ">=8",
         "nails/module-cdn": "dev-feature/pre-new-admin",
         "nails/driver-cdn-local": "dev-feature/pre-new-admin",
-        "google/cloud": "0.*"
+        "google/cloud": "0.*",
+        "ext-json": "*"
     },
     "require-dev":
     {
