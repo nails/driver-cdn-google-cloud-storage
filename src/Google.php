@@ -332,6 +332,32 @@ class Google extends Local
     // --------------------------------------------------------------------------
 
     /**
+     * Determines whether an object's meta data is set correctly or not
+     *
+     * @param string $sFilename        The object's filename
+     * @param string $sFilenameDisplay The object's human-friendly name
+     * @param string $sBucket          The bucket's slug
+     * @param string $sMimeType        The object's mime type
+     *
+     * @return string[]
+     */
+    public function getObjectMetaDataErrors(
+        string $sFilename,
+        string $sFilenameDisplay,
+        string $sBucket,
+        string $sMimeType
+    ): array {
+
+        $aErrors = [];
+
+        //  @todo (Pablo 2025-10-15) -  implement this method, satisfying interface for now
+
+        return $aErrors;
+    }
+
+    // --------------------------------------------------------------------------
+
+    /**
      * BUCKET METHODS
      */
 
