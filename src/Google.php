@@ -347,12 +347,30 @@ class Google extends Local
         string $sBucket,
         string $sMimeType
     ): array {
+        //  @todo (Pablo 2025-10-15) - implement this method, satisfying interface for now
+        return [];
+    }
 
-        $aErrors = [];
+    // --------------------------------------------------------------------------
 
-        //  @todo (Pablo 2025-10-15) -  implement this method, satisfying interface for now
-
-        return $aErrors;
+    /**
+     * Attempt to fix object meta data
+     *
+     * @param string $sFilename        The object's filename
+     * @param string $sFilenameDisplay The object's human-friendly name
+     * @param string $sBucket          The bucket's slug
+     * @param string $sMimeType        The object's mime type
+     *
+     * @return bool
+     */
+    public function fixObjectMetaDataErrors(
+        string $sFilename,
+        string $sFilenameDisplay,
+        string $sBucket,
+        string $sMimeType
+    ): bool {
+        //  @todo (Pablo 2025-10-16) - implement this method, satisfying interface for now
+        return true;
     }
 
     // --------------------------------------------------------------------------
