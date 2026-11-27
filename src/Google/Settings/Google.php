@@ -2,6 +2,7 @@
 
 namespace Nails\Cdn\Driver\Google\Settings;
 
+use Nails\Cdn\Driver\Google\Admin\Permission;
 use Nails\Common\Helper\Form;
 use Nails\Common\Interfaces;
 use Nails\Common\Service\FormValidation;
@@ -37,9 +38,9 @@ class Google implements Interfaces\Component\Settings
     /**
      * @inheritDoc
      */
-    public function getPermissions(): array
+    public function getPermission(): string
     {
-        return [];
+        return Permission\Settings\Google::class;
     }
 
     // --------------------------------------------------------------------------
